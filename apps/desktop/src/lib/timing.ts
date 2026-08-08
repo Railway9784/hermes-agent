@@ -21,8 +21,30 @@ export const STREAM_BATCH_MS = 80
 // keeping streamed text comfortably readable (~8 fps). Terminal transitions
 // bypass this timer and remain immediate.
 export const STREAM_BATTERY_BATCH_MS = 120
+export const STREAM_BACKGROUND_BATCH_MS = 500
+export const STREAM_HIDDEN_BATCH_MS = 1000
 export const STREAM_IDLE_BATCH_MS = 200
 
 export function streamBatchInterval(onBattery: boolean): number {
   return onBattery ? STREAM_BATTERY_BATCH_MS : STREAM_BATCH_MS
+}
+
+export function streamViewBatchInterval({
+  focused,
+  hidden,
+  onBattery
+}: {
+  focused: boolean
+  hidden: boolean
+  onBattery: boolean
+}): number {
+  if (hidden) {
+    return STREAM_HIDDEN_BATCH_MS
+  }
+
+  if (!focused) {
+    return STREAM_BACKGROUND_BATCH_MS
+  }
+
+  return streamBatchInterval(onBattery)
 }

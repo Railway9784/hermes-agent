@@ -333,6 +333,7 @@ describe('useMessageStream composed with the real useSessionStateCache', () => {
   })
 
   it('defers the view publish to the STREAM_BATCH_MS batch timer while streaming', async () => {
+    vi.mocked(document.hasFocus).mockReturnValue(true)
     let now = 1000
     vi.mocked(performance.now).mockImplementation(() => now)
     const rafCallbacks: FrameRequestCallback[] = []

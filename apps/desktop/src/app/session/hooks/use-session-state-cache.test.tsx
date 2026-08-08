@@ -3,7 +3,7 @@ import { type MutableRefObject, useLayoutEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatMessage } from '@/lib/chat-messages'
-import { STREAM_BATCH_MS, STREAM_BATTERY_BATCH_MS } from '@/lib/timing'
+import { STREAM_BACKGROUND_BATCH_MS, STREAM_BATCH_MS, STREAM_BATTERY_BATCH_MS } from '@/lib/timing'
 import { $onBattery } from '@/store/power'
 import {
   $activeSessionStoredIdRotation,
@@ -113,6 +113,7 @@ describe('useSessionStateCache — per-session turn timer', () => {
     setCurrentServiceTier('')
     setCurrentFastMode(false)
     $onBattery.set(false)
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
   })
 
   afterEach(() => {
@@ -185,6 +186,25 @@ describe('useSessionStateCache — per-session turn timer', () => {
 
     act(() => {
       vi.advanceTimersByTime(STREAM_BATTERY_BATCH_MS - STREAM_BATCH_MS)
+    })
+    expect($turnStartedAt.get()).toBe(startedAt)
+  })
+
+  it('publishes a running turn less often while the window is unfocused', () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false)
+    let cache!: Cache
+    render(<Harness activeSessionId="fg-runtime" onReady={c => (cache = c)} selectedStoredSessionId="fg-stored" />)
+
+    const startedAt = 1_700_000_177_000
+
+    act(() => {
+      cache.updateSessionState('fg-runtime', state => ({ ...state, busy: true, turnStartedAt: startedAt }), 'fg-stored')
+      vi.advanceTimersByTime(STREAM_BATTERY_BATCH_MS)
+    })
+    expect($turnStartedAt.get()).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(STREAM_BACKGROUND_BATCH_MS - STREAM_BATTERY_BATCH_MS)
     })
     expect($turnStartedAt.get()).toBe(startedAt)
   })
