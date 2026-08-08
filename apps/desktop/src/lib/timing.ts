@@ -15,4 +15,14 @@
 // streaming) batch harder still: the view is static, only the status line
 // ticks.
 export const STREAM_BATCH_MS = 80
+// On battery, prefer a slightly calmer transcript cadence. Markdown repair,
+// React reconciliation, layout, and compositor work all happen once per view
+// publish, so stretching 80 → 120ms removes a third of those wakeups while
+// keeping streamed text comfortably readable (~8 fps). Terminal transitions
+// bypass this timer and remain immediate.
+export const STREAM_BATTERY_BATCH_MS = 120
 export const STREAM_IDLE_BATCH_MS = 200
+
+export function streamBatchInterval(onBattery: boolean): number {
+  return onBattery ? STREAM_BATTERY_BATCH_MS : STREAM_BATCH_MS
+}

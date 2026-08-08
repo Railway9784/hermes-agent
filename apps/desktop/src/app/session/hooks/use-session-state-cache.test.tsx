@@ -3,7 +3,8 @@ import { type MutableRefObject, useLayoutEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatMessage } from '@/lib/chat-messages'
-import { STREAM_BATCH_MS } from '@/lib/timing'
+import { STREAM_BATCH_MS, STREAM_BATTERY_BATCH_MS } from '@/lib/timing'
+import { $onBattery } from '@/store/power'
 import {
   $activeSessionStoredIdRotation,
   $currentFastMode,
@@ -111,6 +112,7 @@ describe('useSessionStateCache — per-session turn timer', () => {
     setCurrentReasoningEffort('')
     setCurrentServiceTier('')
     setCurrentFastMode(false)
+    $onBattery.set(false)
   })
 
   afterEach(() => {
@@ -123,6 +125,7 @@ describe('useSessionStateCache — per-session turn timer', () => {
     setCurrentReasoningEffort('')
     setCurrentServiceTier('')
     setCurrentFastMode(false)
+    $onBattery.set(false)
   })
 
   it("keeps a background session's running turn clock and never mirrors it to the view", () => {
@@ -160,6 +163,28 @@ describe('useSessionStateCache — per-session turn timer', () => {
 
     act(() => {
       vi.advanceTimersByTime(STREAM_BATCH_MS)
+    })
+    expect($turnStartedAt.get()).toBe(startedAt)
+  })
+
+  it('uses the lower-power streaming cadence while on battery', () => {
+    $onBattery.set(true)
+    let cache!: Cache
+    render(<Harness activeSessionId="fg-runtime" onReady={c => (cache = c)} selectedStoredSessionId="fg-stored" />)
+
+    const startedAt = 1_700_000_166_000
+
+    act(() => {
+      cache.updateSessionState('fg-runtime', state => ({ ...state, busy: true, turnStartedAt: startedAt }), 'fg-stored')
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(STREAM_BATCH_MS)
+    })
+    expect($turnStartedAt.get()).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(STREAM_BATTERY_BATCH_MS - STREAM_BATCH_MS)
     })
     expect($turnStartedAt.get()).toBe(startedAt)
   })

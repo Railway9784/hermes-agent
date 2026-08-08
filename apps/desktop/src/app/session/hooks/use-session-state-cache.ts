@@ -6,7 +6,8 @@ import { preserveLocalAssistantErrors } from '@/lib/chat-messages'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { persistInFlightTurnState } from '@/lib/inflight-turn-journal'
 import { setMutableRef } from '@/lib/mutable-ref'
-import { STREAM_BATCH_MS, STREAM_IDLE_BATCH_MS } from '@/lib/timing'
+import { STREAM_IDLE_BATCH_MS, streamBatchInterval } from '@/lib/timing'
+import { $onBattery } from '@/store/power'
 import {
   $activeSessionId,
   $busy,
@@ -55,6 +56,7 @@ export function useSessionStateCache({
   setMessages
 }: SessionStateCacheOptions) {
   const busy = useStore($busy)
+  const onBattery = useStore($onBattery)
   const activeSessionIdRef = useRef<string | null>(activeSessionId)
   const selectedStoredSessionIdRef = useRef<string | null>(selectedStoredSessionId)
 
@@ -263,14 +265,14 @@ export function useSessionStateCache({
       // synchronous above; timer throttling is scoped to streaming via
       // createStreamThrottle() (electron/stream-throttle.ts) — chat windows are
       // unthrottled only while a turn is in flight, not process-wide.
-      const batchMs = state.busy ? STREAM_BATCH_MS : STREAM_IDLE_BATCH_MS
+      const batchMs = state.busy ? streamBatchInterval(onBattery) : STREAM_IDLE_BATCH_MS
 
       viewSyncTimerRef.current = window.setTimeout(() => {
         viewSyncTimerRef.current = null
         flushPendingViewState()
       }, batchMs)
     },
-    [flushPendingViewState]
+    [flushPendingViewState, onBattery]
   )
 
   useEffect(
