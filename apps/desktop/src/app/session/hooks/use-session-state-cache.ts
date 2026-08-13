@@ -6,7 +6,8 @@ import { preserveLocalAssistantErrors } from '@/lib/chat-messages'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { persistInFlightTurnState } from '@/lib/inflight-turn-journal'
 import { setMutableRef } from '@/lib/mutable-ref'
-import { STREAM_BATCH_MS, STREAM_IDLE_BATCH_MS } from '@/lib/timing'
+import { STREAM_IDLE_BATCH_MS, streamViewBatchInterval } from '@/lib/timing'
+import { $onBattery } from '@/store/power'
 import {
   $activeSessionId,
   $busy,
@@ -55,8 +56,11 @@ export function useSessionStateCache({
   setMessages
 }: SessionStateCacheOptions) {
   const busy = useStore($busy)
+  const onBattery = useStore($onBattery)
   const activeSessionIdRef = useRef<string | null>(activeSessionId)
   const selectedStoredSessionIdRef = useRef<string | null>(selectedStoredSessionId)
+  const windowFocusedRef = useRef(typeof document === 'undefined' || document.hasFocus())
+  const nativeWindowHiddenRef = useRef(false)
 
   // Mirror the latest prop into its ref synchronously during render — not via
   // a passive useEffect, which only fires a frame after paint and left the
@@ -208,6 +212,55 @@ export function useSessionStateCache({
     setTurnStartedAt(pending.state.turnStartedAt)
   }, [busyRef, setAwaitingResponse, setBusy, setMessages])
 
+  // The stream/cache must keep ingesting every delta in the background, but
+  // the shared transcript view does not need to repaint at foreground speed
+  // while nobody can see it. Track focus without state so these events do not
+  // themselves re-render the chat. Flush the newest staged state immediately
+  // on return so a slow background timer never makes the visible UI feel stale.
+  // eslint-disable-next-line no-restricted-syntax -- native window events are imperative external state, not atom mirrors
+  useEffect(() => {
+    const flushOnReturn = () => {
+      if (viewSyncTimerRef.current !== null) {
+        window.clearTimeout(viewSyncTimerRef.current)
+        viewSyncTimerRef.current = null
+      }
+
+      flushPendingViewState()
+    }
+    const onFocus = () => {
+      windowFocusedRef.current = true
+      flushOnReturn()
+    }
+    const onBlur = () => {
+      windowFocusedRef.current = false
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        flushOnReturn()
+      }
+    }
+
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    const offWindowState = window.hermesDesktop?.onWindowStateChanged?.(payload => {
+      if (payload.isMinimized === true || payload.isVisible === false) {
+        nativeWindowHiddenRef.current = true
+      } else if (payload.isMinimized === false || payload.isVisible === true) {
+        nativeWindowHiddenRef.current = false
+        flushOnReturn()
+      }
+    })
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      offWindowState?.()
+    }
+  }, [flushPendingViewState])
+
   const syncSessionStateToView = useCallback(
     (sessionId: string, state: ClientSessionState) => {
       // Only the currently-viewed session may stage into the shared `$messages`
@@ -263,14 +316,20 @@ export function useSessionStateCache({
       // synchronous above; timer throttling is scoped to streaming via
       // createStreamThrottle() (electron/stream-throttle.ts) — chat windows are
       // unthrottled only while a turn is in flight, not process-wide.
-      const batchMs = state.busy ? STREAM_BATCH_MS : STREAM_IDLE_BATCH_MS
+      const batchMs = state.busy
+        ? streamViewBatchInterval({
+            focused: windowFocusedRef.current,
+            hidden: nativeWindowHiddenRef.current || document.visibilityState === 'hidden',
+            onBattery
+          })
+        : STREAM_IDLE_BATCH_MS
 
       viewSyncTimerRef.current = window.setTimeout(() => {
         viewSyncTimerRef.current = null
         flushPendingViewState()
       }, batchMs)
     },
-    [flushPendingViewState]
+    [flushPendingViewState, onBattery]
   )
 
   useEffect(
